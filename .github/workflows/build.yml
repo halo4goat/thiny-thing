@@ -1,1 +1,20 @@
-
+name: build
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GdMacroMenu
+          path: |
+            build/Release/GdMacroMenu.exe
+            build/Release/gd_offsets.cfg
+            build/Release/thinkingspace2.gdm
