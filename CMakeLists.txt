@@ -22,7 +22,7 @@ target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi)
 
 add_executable(GdMacroMenu WIN32
     src/main.cpp src/Config.cpp src/Process.cpp
-    src/Input.cpp src/Macro.cpp src/Bot.cpp)
+    src/Input.cpp src/Macro.cpp src/Bot.cpp src/Sound.cpp)
 target_compile_definitions(GdMacroMenu PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 target_link_libraries(GdMacroMenu PRIVATE imgui winmm)
 if(MSVC)
