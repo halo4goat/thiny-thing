@@ -17,6 +17,8 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
         attempts = 0;
         isolatedSent = 0;
         isolatedSkipped = 0;
+        maxLoopGapUs = 0;
+        lastFiredIdx = -1;
     } else {
         clicksRecorded = 0;
     }
@@ -46,6 +48,7 @@ void Bot::setMacro(Macro m) { std::lock_guard lk(mu_); macro_ = std::move(m); }
 
 void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAction> actions) {
     timeBeginPeriod(1);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     const int vk = virtualKeyFor(kind);
 
     bool held = false;
@@ -90,6 +93,8 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     std::size_t idx = 0;
     bool needSeek = true;
     bool keyPrev = false, keyPrevValid = false;
+    long long prevTick = 0;
+    bool havePrevTick = false;
 
     while (!st.stop_requested()) {
         float x = 0;
@@ -101,11 +106,20 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                 if (useIsolated) isolatedUp(true);
             }
             setStatus(std::string("waiting: ") + describe(r));
-            havePrev = false; needSeek = true; keyPrevValid = false;
+            havePrev = false; needSeek = true; keyPrevValid = false; havePrevTick = false;
             Sleep(5);
             continue;
         }
         lastX = x;
+        {
+            const long long t = nowTicks();
+            if (havePrevTick && mode == Mode::Playing) {
+                const auto gap = static_cast<std::uint32_t>((t - prevTick) * 1000000 / freq.QuadPart);
+                if (gap > maxLoopGapUs.load()) maxLoopGapUs = gap;
+            }
+            prevTick = t;
+            havePrevTick = true;
+        }
         const bool fg = proc_.isForeground();
         const bool reset = havePrev && x < prevX - resetThreshold.load();
         if (reset) ++attempts;
@@ -128,6 +142,9 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                 while (idx < actions.size() && actions[idx].x <= fire) {
                     const bool press = actions[idx].down && !held;
                     syncHold(actions[idx].down);
+                    lastFiredIdx = static_cast<int>(idx);
+                    lastFiredMacroX = actions[idx].x;
+                    lastFiredActualX = x;
                     if (press && useIsolated) isolatedDown();
                     ++idx;
                 }
@@ -173,6 +190,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
         if (!actions.empty() && actions.back().down) actions.push_back({lastX.load(), false});
         setMacro(Macro{std::move(actions)});
     }
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
     timeEndPeriod(1);
     mode_ = Mode::Idle;
     if (!st.stop_requested()) return;  // keep the exit reason in status
