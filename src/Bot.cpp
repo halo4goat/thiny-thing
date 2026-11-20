@@ -1,6 +1,7 @@
 #include "Bot.h"
 
 #include <windows.h>
+#include <timeapi.h>
 
 #include <algorithm>
 
