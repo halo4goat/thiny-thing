@@ -1,0 +1,9 @@
+BUILD (once):   build.bat   -> build\Release\GdMacroMenu.exe
+                (needs Visual Studio 2022 with Desktop C++, CMake 3.24+, git, internet for Dear ImGui)
+
+RUN:
+ 1. Start Geometry Dash, load Thinking Space 2 (the "fix" copy the replay was recorded on), stay at the start of the level.
+ 2. Start GdMacroMenu.exe with the SAME elevation as the game (both normal, or both admin).
+ 3. Click Attach. "Observed module size" must be 0xC9D000, otherwise the offsets are for another build.
+ 4. The file thinkingspace2.gdm loads automatically (396 actions). Player X must read about 117.2 when you reach the first click.
+ 5. Click the game window to focus it, then press F7 to play (F7 again to stop). F6 records.
