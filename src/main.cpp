@@ -160,6 +160,7 @@ void drawUi(App& a) {
         a.bot.isolatedHoldMs = std::clamp(holdMs, 0.f, 100.f);
     ImGui::EndDisabled();
     if (a.inputKind == 2) ImGui::TextDisabled("Isolated click is ignored when the main input is already the mouse.");
+    ImGui::TextWrapped("Note: the game may treat the mouse button as the same jump button, so the mouse release can cut holds short. Leave this off unless you are testing it.");
 
     ImGui::SeparatorText("Macro (relative paths are next to the exe)");
     ImGui::InputText("File", a.macroPath, sizeof(a.macroPath));
@@ -186,6 +187,14 @@ void drawUi(App& a) {
     ImGui::Text("Isolated mouse clicks: %llu sent, %llu skipped",
                 (unsigned long long)a.bot.isolatedSent.load(),
                 (unsigned long long)a.bot.isolatedSkipped.load());
+    const int fired = a.bot.lastFiredIdx.load();
+    if (fired < 0) {
+        ImGui::Text("Last fired action: none yet");
+    } else {
+        const float mx = a.bot.lastFiredMacroX.load(), ax = a.bot.lastFiredActualX.load();
+        ImGui::Text("Last fired action #%d: macro X %.2f, fired when X read %.2f (diff %+.2f)", fired, mx, ax, ax - mx);
+    }
+    ImGui::Text("Longest gap between X reads: %u us", a.bot.maxLoopGapUs.load());
     if (!a.actionError.empty()) ImGui::TextWrapped("%s", a.actionError.c_str());
 
     ImGui::End();
