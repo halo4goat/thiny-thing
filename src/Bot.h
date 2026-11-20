@@ -33,6 +33,10 @@ public:
     std::atomic<std::uint64_t> clicksSent{0}, clicksRecorded{0}, attempts{0};
     std::atomic<std::uint64_t> isolatedSent{0}, isolatedSkipped{0};
     std::atomic<float> lastX{0.f};
+    // Timing diagnostics for playback.
+    std::atomic<std::uint32_t> maxLoopGapUs{0};   // longest gap between two successful X reads
+    std::atomic<int> lastFiredIdx{-1};
+    std::atomic<float> lastFiredMacroX{0.f}, lastFiredActualX{0.f};
 
 private:
     void run(std::stop_token st, Mode m, InputKind kind, std::vector<MacroAction> actions);
