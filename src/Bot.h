@@ -9,6 +9,7 @@
 #include "Input.h"
 #include "Macro.h"
 #include "Process.h"
+#include "Sound.h"
 
 class Bot {
 public:
@@ -29,6 +30,8 @@ public:
     std::atomic<float> resetThreshold{30.f};   // X dropping by more than this = attempt restart
     std::atomic<bool> isolatedMouse{false};    // read once at start of playback
     std::atomic<float> isolatedHoldMs{5.f};
+    std::atomic<bool> clickSound{false};       // read once at start of playback
+    void testClickSound() { sounder_.press(); }
 
     std::atomic<std::uint64_t> clicksSent{0}, clicksRecorded{0}, attempts{0};
     std::atomic<std::uint64_t> isolatedSent{0}, isolatedSkipped{0};
@@ -43,6 +46,7 @@ private:
     void setStatus(std::string s);
 
     GameProcess& proc_;
+    ClickSounder sounder_;  // declared before worker_ so it outlives the playback thread
     std::jthread worker_;
     std::atomic<Mode> mode_{Mode::Idle};
     mutable std::mutex mu_;

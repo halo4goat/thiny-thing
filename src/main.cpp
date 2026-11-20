@@ -162,6 +162,14 @@ void drawUi(App& a) {
     if (a.inputKind == 2) ImGui::TextDisabled("Isolated click is ignored when the main input is already the mouse.");
     ImGui::TextWrapped("Note: the game may treat the mouse button as the same jump button, so the mouse release can cut holds short. Leave this off unless you are testing it.");
 
+    bool snd = a.bot.clickSound.load();
+    ImGui::BeginDisabled(running);
+    if (ImGui::Checkbox("Menu click sound on each macro press/release", &snd)) a.bot.clickSound = snd;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Test sound")) a.bot.testClickSound();
+    ImGui::TextDisabled("The sound is played by this menu. The game itself makes no sound when you jump.");
+
     ImGui::SeparatorText("Macro (relative paths are next to the exe)");
     ImGui::InputText("File", a.macroPath, sizeof(a.macroPath));
     ImGui::BeginDisabled(running);

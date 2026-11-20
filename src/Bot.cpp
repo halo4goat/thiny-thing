@@ -51,15 +51,18 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     const int vk = virtualKeyFor(kind);
 
+    const bool soundOn = mode == Mode::Playing && clickSound.load();
     bool held = false;
     auto syncHold = [&](bool want) {
         if (want && !held) {
             if (!sendClick(kind, true)) setStatus("SendInput failed (elevation mismatch?)");
             held = true;
             ++clicksSent;
+            if (soundOn) sounder_.press();
         } else if (!want && held) {
             sendClick(kind, false);
             held = false;
+            if (soundOn) sounder_.release();
         }
     };
 
