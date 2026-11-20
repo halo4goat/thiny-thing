@@ -147,8 +147,8 @@ void drawUi(App& a) {
     ImGui::BeginDisabled(running);
     ImGui::Combo("Click input", &a.inputKind, "Space\0Up arrow\0Left mouse\0");
     ImGui::EndDisabled();
-    float lead = a.bot.leadUnits.load();
-    if (ImGui::InputFloat("Lead (X units)", &lead, 0.5f, 2.f, "%.2f")) a.bot.leadUnits = std::clamp(lead, 0.f, 200.f);
+    float lead = a.bot.leadMs.load();
+    if (ImGui::InputFloat("Lead (ms, scaled by measured speed)", &lead, 0.5f, 2.f, "%.1f")) a.bot.leadMs = std::clamp(lead, 0.f, 100.f);
     float thr = a.bot.resetThreshold.load();
     if (ImGui::InputFloat("Restart threshold (X units)", &thr, 1.f, 10.f, "%.1f")) a.bot.resetThreshold = std::clamp(thr, 1.f, 100000.f);
 
@@ -203,6 +203,14 @@ void drawUi(App& a) {
         ImGui::Text("Last fired action #%d: macro X %.2f, fired when X read %.2f (diff %+.2f)", fired, mx, ax, ax - mx);
     }
     ImGui::Text("Longest gap between X reads: %u us", a.bot.maxLoopGapUs.load());
+    ImGui::Text("Measured speed: %.1f units/s", a.bot.estSpeed.load());
+    ImGui::SeparatorText("Deaths this run (newest last)");
+    const auto deaths = a.bot.deaths();
+    for (std::size_t i = deaths.size() > 8 ? deaths.size() - 8 : 0; i < deaths.size(); ++i) {
+        const auto& d = deaths[i];
+        ImGui::TextWrapped("X %.1f | last fired #%d (macro %.1f, read %.1f) | next #%d at %.1f",
+                           d.x, d.lastIdx, d.lastMacroX, d.lastActualX, d.nextIdx, d.nextMacroX);
+    }
     if (!a.actionError.empty()) ImGui::TextWrapped("%s", a.actionError.c_str());
 
     ImGui::End();
@@ -213,7 +221,7 @@ void drawUi(App& a) {
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wndProc, 0, 0, inst, nullptr, nullptr, nullptr, nullptr, L"GdMacroMenu", nullptr};
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowW(wc.lpszClassName, L"GD Macro Menu", WS_OVERLAPPEDWINDOW, 100, 100, 520, 700,
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"GD Macro Menu", WS_OVERLAPPEDWINDOW, 100, 100, 560, 900,
                               nullptr, nullptr, inst, nullptr);
     if (!createDevice(hwnd)) { destroyDevice(); UnregisterClassW(wc.lpszClassName, inst); return 1; }
     ShowWindow(hwnd, SW_SHOWDEFAULT);

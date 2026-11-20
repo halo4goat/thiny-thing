@@ -26,7 +26,7 @@ public:
     void setMacro(Macro m);
 
     // Uncalibrated: tune in the game.
-    std::atomic<float> leadUnits{0.f};         // fire this many X-units early to cover input latency
+    std::atomic<float> leadMs{0.f};            // fire this many milliseconds early (converted to X units with the measured speed)
     std::atomic<float> resetThreshold{30.f};   // X dropping by more than this = attempt restart
     std::atomic<bool> isolatedMouse{false};    // read once at start of playback
     std::atomic<float> isolatedHoldMs{5.f};
@@ -36,10 +36,21 @@ public:
     std::atomic<std::uint64_t> clicksSent{0}, clicksRecorded{0}, attempts{0};
     std::atomic<std::uint64_t> isolatedSent{0}, isolatedSkipped{0};
     std::atomic<float> lastX{0.f};
+    std::atomic<float> estSpeed{0.f};          // measured X units per second
     // Timing diagnostics for playback.
     std::atomic<std::uint32_t> maxLoopGapUs{0};   // longest gap between two successful X reads
     std::atomic<int> lastFiredIdx{-1};
     std::atomic<float> lastFiredMacroX{0.f}, lastFiredActualX{0.f};
+
+    struct DeathRecord {
+        float x;             // last X before the restart
+        int lastIdx;         // last macro action fired before dying
+        float lastMacroX;    // its X in the macro
+        float lastActualX;   // the X that was read when it fired
+        int nextIdx;         // next action that had not fired yet
+        float nextMacroX;    // its X in the macro (-1 if none)
+    };
+    std::vector<DeathRecord> deaths() const;
 
 private:
     void run(std::stop_token st, Mode m, InputKind kind, std::vector<MacroAction> actions);
@@ -52,4 +63,5 @@ private:
     mutable std::mutex mu_;
     std::string status_ = "idle";
     Macro macro_;
+    std::vector<DeathRecord> deaths_;
 };

@@ -19,6 +19,8 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
         isolatedSkipped = 0;
         maxLoopGapUs = 0;
         lastFiredIdx = -1;
+        estSpeed = 0.f;
+        { std::lock_guard lk(mu_); deaths_.clear(); }
     } else {
         clicksRecorded = 0;
     }
@@ -44,6 +46,7 @@ void Bot::stop() {
 std::string Bot::status() const { std::lock_guard lk(mu_); return status_; }
 void Bot::setStatus(std::string s) { std::lock_guard lk(mu_); status_ = std::move(s); }
 Macro Bot::macro() const { std::lock_guard lk(mu_); return macro_; }
+std::vector<Bot::DeathRecord> Bot::deaths() const { std::lock_guard lk(mu_); return deaths_; }
 void Bot::setMacro(Macro m) { std::lock_guard lk(mu_); macro_ = std::move(m); }
 
 void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAction> actions) {
@@ -98,6 +101,10 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     bool keyPrev = false, keyPrevValid = false;
     long long prevTick = 0;
     bool havePrevTick = false;
+    double vel = 0.0;            // X units per millisecond, measured from observed X changes
+    long long changeTick = 0;
+    float changeX = 0;
+    bool haveChange = false;
 
     while (!st.stop_requested()) {
         float x = 0;
@@ -110,6 +117,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             }
             setStatus(std::string("waiting: ") + describe(r));
             havePrev = false; needSeek = true; keyPrevValid = false; havePrevTick = false;
+            vel = 0.0; haveChange = false; estSpeed = 0.f;
             Sleep(5);
             continue;
         }
@@ -122,10 +130,31 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             }
             prevTick = t;
             havePrevTick = true;
+
+            if (!haveChange) {
+                changeTick = t; changeX = x; haveChange = true;
+            } else if (x != changeX) {
+                const double dtMs = static_cast<double>(t - changeTick) * 1000.0 / static_cast<double>(freq.QuadPart);
+                const double dx = static_cast<double>(x) - static_cast<double>(changeX);
+                if (dtMs > 0.5 && dtMs < 50.0 && dx > 0.0) {  // skips restarts and pauses
+                    const double v = dx / dtMs;
+                    vel = (vel == 0.0) ? v : 0.7 * vel + 0.3 * v;
+                    estSpeed = static_cast<float>(vel * 1000.0);
+                }
+                changeTick = t; changeX = x;
+            }
         }
         const bool fg = proc_.isForeground();
         const bool reset = havePrev && x < prevX - resetThreshold.load();
         if (reset) ++attempts;
+        if (reset && mode == Mode::Playing) {
+            const DeathRecord d{prevX, lastFiredIdx.load(), lastFiredMacroX.load(), lastFiredActualX.load(),
+                                static_cast<int>(idx), idx < actions.size() ? actions[idx].x : -1.f};
+            std::lock_guard lk(mu_);
+            if (deaths_.size() >= 50) deaths_.erase(deaths_.begin());
+            deaths_.push_back(d);
+        }
+        if (reset) { vel = 0.0; haveChange = false; estSpeed = 0.f; }
 
         if (mode == Mode::Playing) {
             if (useIsolated) isolatedUp(false);
@@ -141,7 +170,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                     syncHold(holdBefore(actions, idx));
                     needSeek = false;
                 }
-                const float fire = x + leadUnits.load();
+                const float fire = x + static_cast<float>(vel * static_cast<double>(leadMs.load()));
                 while (idx < actions.size() && actions[idx].x <= fire) {
                     const bool press = actions[idx].down && !held;
                     syncHold(actions[idx].down);
