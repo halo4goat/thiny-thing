@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <string>
 
 #include "Bot.h"
@@ -77,7 +79,7 @@ struct App {
     GameProcess proc;
     Bot bot{proc};
     std::filesystem::path exeDir, cfgPath;
-    std::string cfgError, attachError, actionError, fileMsg;
+    std::string cfgError, attachError, actionError, fileMsg, traceMsg;
     char macroPath[260] = "thinkingspace2.gdm";
     int inputKind = 0;
 
@@ -94,6 +96,15 @@ struct App {
         } else {
             fileMsg = err;
         }
+    }
+
+    void saveTrace() {
+        const auto rows = bot.traceSnapshot();
+        std::ofstream f(exeDir / "trace.csv", std::ios::trunc);
+        if (!f) { traceMsg = "cannot write trace.csv next to the exe"; return; }
+        f << "t_ms,x,idx,event\n" << std::fixed << std::setprecision(3);
+        for (const auto& r : rows) f << r.tMs << ',' << r.x << ',' << r.idx << ',' << r.event << '\n';
+        traceMsg = "saved " + std::to_string(rows.size()) + " rows to trace.csv";
     }
 
     void reloadConfig() {
@@ -204,6 +215,8 @@ void drawUi(App& a) {
     }
     ImGui::Text("Longest gap between X reads: %u us", a.bot.maxLoopGapUs.load());
     ImGui::Text("Measured speed: %.1f units/s", a.bot.estSpeed.load());
+    if (ImGui::Button("Save trace to trace.csv")) a.saveTrace();
+    if (!a.traceMsg.empty()) ImGui::TextWrapped("%s", a.traceMsg.c_str());
     ImGui::SeparatorText("Deaths this run (newest last)");
     const auto deaths = a.bot.deaths();
     for (std::size_t i = deaths.size() > 8 ? deaths.size() - 8 : 0; i < deaths.size(); ++i) {

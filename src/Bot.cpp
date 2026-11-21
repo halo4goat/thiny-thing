@@ -20,6 +20,7 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
         maxLoopGapUs = 0;
         lastFiredIdx = -1;
         estSpeed = 0.f;
+        traceHead_ = 0;
         { std::lock_guard lk(mu_); deaths_.clear(); }
     } else {
         clicksRecorded = 0;
@@ -47,12 +48,35 @@ std::string Bot::status() const { std::lock_guard lk(mu_); return status_; }
 void Bot::setStatus(std::string s) { std::lock_guard lk(mu_); status_ = std::move(s); }
 Macro Bot::macro() const { std::lock_guard lk(mu_); return macro_; }
 std::vector<Bot::DeathRecord> Bot::deaths() const { std::lock_guard lk(mu_); return deaths_; }
+
+void Bot::tracePush(double tMs, float x, int idx, int event) {
+    const std::uint32_t h = traceHead_.load(std::memory_order_relaxed);
+    trace_[h % kTraceSize] = TraceRow{tMs, x, idx, event};
+    traceHead_.store(h + 1, std::memory_order_release);
+}
+
+std::vector<Bot::TraceRow> Bot::traceSnapshot() const {
+    const std::uint32_t h = traceHead_.load(std::memory_order_acquire);
+    const std::uint32_t n = h < kTraceSize ? h : static_cast<std::uint32_t>(kTraceSize);
+    std::vector<TraceRow> rows;
+    rows.reserve(n);
+    for (std::uint32_t i = h - n; i != h; ++i) rows.push_back(trace_[i % kTraceSize]);
+    return rows;
+}
 void Bot::setMacro(Macro m) { std::lock_guard lk(mu_); macro_ = std::move(m); }
 
 void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAction> actions) {
     timeBeginPeriod(1);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     const int vk = virtualKeyFor(kind);
+
+    LARGE_INTEGER freq{};
+    QueryPerformanceFrequency(&freq);
+    auto nowTicks = [] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; };
+    const long long t0 = nowTicks();
+    auto msNow = [&] { return static_cast<double>(nowTicks() - t0) * 1000.0 / static_cast<double>(freq.QuadPart); };
+    std::size_t idx = 0;
+    float curX = 0;
 
     const bool soundOn = mode == Mode::Playing && clickSound.load();
     bool held = false;
@@ -61,17 +85,15 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             if (!sendClick(kind, true)) setStatus("SendInput failed (elevation mismatch?)");
             held = true;
             ++clicksSent;
+            if (mode == Mode::Playing) tracePush(msNow(), curX, static_cast<int>(idx), 1);
             if (soundOn) sounder_.press();
         } else if (!want && held) {
             sendClick(kind, false);
             held = false;
+            if (mode == Mode::Playing) tracePush(msNow(), curX, static_cast<int>(idx), 2);
             if (soundOn) sounder_.release();
         }
     };
-
-    LARGE_INTEGER freq{};
-    QueryPerformanceFrequency(&freq);
-    auto nowTicks = [] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; };
 
     const bool useIsolated =
         mode == Mode::Playing && kind != InputKind::Mouse && isolatedMouse.load();
@@ -96,7 +118,6 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
 
     float prevX = 0;
     bool havePrev = false;
-    std::size_t idx = 0;
     bool needSeek = true;
     bool keyPrev = false, keyPrevValid = false;
     long long prevTick = 0;
@@ -105,6 +126,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     long long changeTick = 0;
     float changeX = 0;
     bool haveChange = false;
+    float traceX = -1.0e9f;
 
     while (!st.stop_requested()) {
         float x = 0;
@@ -122,6 +144,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             continue;
         }
         lastX = x;
+        curX = x;
         {
             const long long t = nowTicks();
             if (havePrevTick && mode == Mode::Playing) {
@@ -143,10 +166,15 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                 }
                 changeTick = t; changeX = x;
             }
+            if (mode == Mode::Playing && x != traceX) {
+                tracePush(static_cast<double>(t - t0) * 1000.0 / static_cast<double>(freq.QuadPart), x, static_cast<int>(idx), 0);
+                traceX = x;
+            }
         }
         const bool fg = proc_.isForeground();
         const bool reset = havePrev && x < prevX - resetThreshold.load();
         if (reset) ++attempts;
+        if (reset && mode == Mode::Playing) tracePush(msNow(), x, static_cast<int>(idx), 3);
         if (reset && mode == Mode::Playing) {
             const DeathRecord d{prevX, lastFiredIdx.load(), lastFiredMacroX.load(), lastFiredActualX.load(),
                                 static_cast<int>(idx), idx < actions.size() ? actions[idx].x : -1.f};

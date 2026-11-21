@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -52,6 +53,11 @@ public:
     };
     std::vector<DeathRecord> deaths() const;
 
+    // Playback trace for debugging (ring buffer, newest rows kept).
+    // event: 0 = X changed, 1 = press sent, 2 = release sent, 3 = restart detected
+    struct TraceRow { double tMs; float x; int idx; int event; };
+    std::vector<TraceRow> traceSnapshot() const;
+
 private:
     void run(std::stop_token st, Mode m, InputKind kind, std::vector<MacroAction> actions);
     void setStatus(std::string s);
@@ -64,4 +70,9 @@ private:
     std::string status_ = "idle";
     Macro macro_;
     std::vector<DeathRecord> deaths_;
+
+    static constexpr std::size_t kTraceSize = 8192;
+    std::array<TraceRow, kTraceSize> trace_{};
+    std::atomic<std::uint32_t> traceHead_{0};
+    void tracePush(double tMs, float x, int idx, int event);
 };
