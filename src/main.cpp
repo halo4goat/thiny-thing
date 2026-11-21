@@ -148,7 +148,7 @@ void drawUi(App& a) {
     ImGui::Combo("Click input", &a.inputKind, "Space\0Up arrow\0Left mouse\0");
     ImGui::EndDisabled();
     float lead = a.bot.leadMs.load();
-    if (ImGui::InputFloat("Lead (ms, scaled by measured speed)", &lead, 0.5f, 2.f, "%.1f")) a.bot.leadMs = std::clamp(lead, 0.f, 100.f);
+    if (ImGui::InputFloat("Lead (ms, negative = click later)", &lead, 0.5f, 2.f, "%.1f")) a.bot.leadMs = std::clamp(lead, -50.f, 100.f);
     float thr = a.bot.resetThreshold.load();
     if (ImGui::InputFloat("Restart threshold (X units)", &thr, 1.f, 10.f, "%.1f")) a.bot.resetThreshold = std::clamp(thr, 1.f, 100000.f);
 
