@@ -38,6 +38,8 @@ public:
     std::atomic<std::uint64_t> isolatedSent{0}, isolatedSkipped{0};
     std::atomic<float> lastX{0.f};
     std::atomic<float> estSpeed{0.f};          // measured X units per second
+    std::atomic<float> lastY{0.f};
+    std::atomic<std::uint64_t> staleSkipped{0};  // actions skipped because the player was already far past them
     // Timing diagnostics for playback.
     std::atomic<std::uint32_t> maxLoopGapUs{0};   // longest gap between two successful X reads
     std::atomic<int> lastFiredIdx{-1};
@@ -55,7 +57,7 @@ public:
 
     // Playback trace for debugging (ring buffer, newest rows kept).
     // event: 0 = X changed, 1 = press sent, 2 = release sent, 3 = restart detected
-    struct TraceRow { double tMs; float x; int idx; int event; };
+    struct TraceRow { double tMs; float x; float y; int idx; int event; };
     std::vector<TraceRow> traceSnapshot() const;
 
 private:
@@ -74,5 +76,5 @@ private:
     static constexpr std::size_t kTraceSize = 8192;
     std::array<TraceRow, kTraceSize> trace_{};
     std::atomic<std::uint32_t> traceHead_{0};
-    void tracePush(double tMs, float x, int idx, int event);
+    void tracePush(double tMs, float x, float y, int idx, int event);
 };

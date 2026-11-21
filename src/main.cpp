@@ -102,8 +102,8 @@ struct App {
         const auto rows = bot.traceSnapshot();
         std::ofstream f(exeDir / "trace.csv", std::ios::trunc);
         if (!f) { traceMsg = "cannot write trace.csv next to the exe"; return; }
-        f << "t_ms,x,idx,event\n" << std::fixed << std::setprecision(3);
-        for (const auto& r : rows) f << r.tMs << ',' << r.x << ',' << r.idx << ',' << r.event << '\n';
+        f << "t_ms,x,y,idx,event\n" << std::fixed << std::setprecision(4);
+        for (const auto& r : rows) f << r.tMs << ',' << r.x << ',' << r.y << ',' << r.idx << ',' << r.event << '\n';
         traceMsg = "saved " + std::to_string(rows.size()) + " rows to trace.csv";
     }
 
@@ -146,11 +146,11 @@ void drawUi(App& a) {
     if (ImGui::Button("Reload offsets")) a.reloadConfig();
     ImGui::EndDisabled();
 
-    float x = 0;
+    float x = 0, y = 0;
     ImGui::SeparatorText("Live");
     if (a.proc.attached()) {
-        ReadResult r = a.proc.readPlayerX(x);
-        if (r == ReadResult::Ok) ImGui::Text("Player X: %.3f", x);
+        ReadResult r = a.proc.readPlayerPos(x, y);
+        if (r == ReadResult::Ok) ImGui::Text("Player X: %.3f   Y: %.3f", x, y);
         else ImGui::Text("Player X: %s", describe(r));
     }
 
@@ -214,7 +214,8 @@ void drawUi(App& a) {
         ImGui::Text("Last fired action #%d: macro X %.2f, fired when X read %.2f (diff %+.2f)", fired, mx, ax, ax - mx);
     }
     ImGui::Text("Longest gap between X reads: %u us", a.bot.maxLoopGapUs.load());
-    ImGui::Text("Measured speed: %.1f units/s", a.bot.estSpeed.load());
+    ImGui::Text("Measured speed: %.1f units/s   Skipped as stale: %llu", a.bot.estSpeed.load(),
+                (unsigned long long)a.bot.staleSkipped.load());
     if (ImGui::Button("Save trace to trace.csv")) a.saveTrace();
     if (!a.traceMsg.empty()) ImGui::TextWrapped("%s", a.traceMsg.c_str());
     ImGui::SeparatorText("Deaths this run (newest last)");

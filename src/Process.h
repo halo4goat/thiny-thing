@@ -22,6 +22,7 @@ public:
     bool isForeground() const;
     bool cursorOverGame() const;
     ReadResult readPlayerX(float& x) const;
+    ReadResult readPlayerPos(float& x, float& y) const;  // y is NaN if the float next to X is not finite
     std::uint64_t observedModuleSize() const { return size_; }
 
 private:

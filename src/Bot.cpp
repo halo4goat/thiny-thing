@@ -21,6 +21,7 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
         lastFiredIdx = -1;
         estSpeed = 0.f;
         traceHead_ = 0;
+        staleSkipped = 0;
         { std::lock_guard lk(mu_); deaths_.clear(); }
     } else {
         clicksRecorded = 0;
@@ -49,9 +50,9 @@ void Bot::setStatus(std::string s) { std::lock_guard lk(mu_); status_ = std::mov
 Macro Bot::macro() const { std::lock_guard lk(mu_); return macro_; }
 std::vector<Bot::DeathRecord> Bot::deaths() const { std::lock_guard lk(mu_); return deaths_; }
 
-void Bot::tracePush(double tMs, float x, int idx, int event) {
+void Bot::tracePush(double tMs, float x, float y, int idx, int event) {
     const std::uint32_t h = traceHead_.load(std::memory_order_relaxed);
-    trace_[h % kTraceSize] = TraceRow{tMs, x, idx, event};
+    trace_[h % kTraceSize] = TraceRow{tMs, x, y, idx, event};
     traceHead_.store(h + 1, std::memory_order_release);
 }
 
@@ -76,7 +77,8 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     const long long t0 = nowTicks();
     auto msNow = [&] { return static_cast<double>(nowTicks() - t0) * 1000.0 / static_cast<double>(freq.QuadPart); };
     std::size_t idx = 0;
-    float curX = 0;
+    float curX = 0, curY = 0;
+    constexpr double kResetConfirmMs = 5.0;  // a drop in X must persist this long to count as a restart
 
     const bool soundOn = mode == Mode::Playing && clickSound.load();
     bool held = false;
@@ -85,12 +87,12 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             if (!sendClick(kind, true)) setStatus("SendInput failed (elevation mismatch?)");
             held = true;
             ++clicksSent;
-            if (mode == Mode::Playing) tracePush(msNow(), curX, static_cast<int>(idx), 1);
+            if (mode == Mode::Playing) tracePush(msNow(), curX, curY, static_cast<int>(idx), 1);
             if (soundOn) sounder_.press();
         } else if (!want && held) {
             sendClick(kind, false);
             held = false;
-            if (mode == Mode::Playing) tracePush(msNow(), curX, static_cast<int>(idx), 2);
+            if (mode == Mode::Playing) tracePush(msNow(), curX, curY, static_cast<int>(idx), 2);
             if (soundOn) sounder_.release();
         }
     };
@@ -127,10 +129,12 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     float changeX = 0;
     bool haveChange = false;
     float traceX = -1.0e9f;
+    bool lowPending = false;
+    long long lowSince = 0;
 
     while (!st.stop_requested()) {
-        float x = 0;
-        const ReadResult r = proc_.readPlayerX(x);
+        float x = 0, y = 0;
+        const ReadResult r = proc_.readPlayerPos(x, y);
         if (r == ReadResult::ProcessGone) { setStatus("game process exited"); break; }
         if (r != ReadResult::Ok) {
             if (mode == Mode::Playing) {
@@ -143,8 +147,22 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
             Sleep(5);
             continue;
         }
+        {   // A one-off low read (seen right at a death) is ignored unless it persists.
+            const long long tRead = nowTicks();
+            if (havePrev && x < prevX - resetThreshold.load()) {
+                if (!lowPending) { lowPending = true; lowSince = tRead; }
+                if (static_cast<double>(tRead - lowSince) * 1000.0 / static_cast<double>(freq.QuadPart) < kResetConfirmMs) {
+                    std::this_thread::yield();
+                    continue;
+                }
+            } else {
+                lowPending = false;
+            }
+        }
         lastX = x;
+        lastY = y;
         curX = x;
+        curY = y;
         {
             const long long t = nowTicks();
             if (havePrevTick && mode == Mode::Playing) {
@@ -167,14 +185,14 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                 changeTick = t; changeX = x;
             }
             if (mode == Mode::Playing && x != traceX) {
-                tracePush(static_cast<double>(t - t0) * 1000.0 / static_cast<double>(freq.QuadPart), x, static_cast<int>(idx), 0);
+                tracePush(static_cast<double>(t - t0) * 1000.0 / static_cast<double>(freq.QuadPart), x, y, static_cast<int>(idx), 0);
                 traceX = x;
             }
         }
         const bool fg = proc_.isForeground();
         const bool reset = havePrev && x < prevX - resetThreshold.load();
         if (reset) ++attempts;
-        if (reset && mode == Mode::Playing) tracePush(msNow(), x, static_cast<int>(idx), 3);
+        if (reset && mode == Mode::Playing) tracePush(msNow(), x, y, static_cast<int>(idx), 3);
         if (reset && mode == Mode::Playing) {
             const DeathRecord d{prevX, lastFiredIdx.load(), lastFiredMacroX.load(), lastFiredActualX.load(),
                                 static_cast<int>(idx), idx < actions.size() ? actions[idx].x : -1.f};
@@ -198,8 +216,16 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                     syncHold(holdBefore(actions, idx));
                     needSeek = false;
                 }
-                const float fire = x + static_cast<float>(vel * static_cast<double>(leadMs.load()));
-                while (idx < actions.size() && actions[idx].x <= fire) {
+                const double leadUnits = vel * static_cast<double>(leadMs.load());
+                const float fire = x + static_cast<float>(leadUnits);
+                const float staleLimit = 20.f + static_cast<float>(leadUnits < 0.0 ? -leadUnits : 0.0);
+                bool skipped = false;
+                // 1e-3 tolerance: macro X values are float32 and must not lose a whole step to rounding.
+                while (idx < actions.size() && actions[idx].x <= fire + 1e-3f) {
+                    if (x - actions[idx].x > staleLimit) {  // far behind: skip instead of bursting late clicks
+                        skipped = true; ++staleSkipped; ++idx;
+                        continue;
+                    }
                     const bool press = actions[idx].down && !held;
                     syncHold(actions[idx].down);
                     lastFiredIdx = static_cast<int>(idx);
@@ -208,6 +234,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                     if (press && useIsolated) isolatedDown();
                     ++idx;
                 }
+                if (skipped) syncHold(holdBefore(actions, idx));
                 setStatus("playing");
             }
         } else {  // Recording

@@ -117,6 +117,11 @@ bool GameProcess::readRaw(std::uint64_t addr, void* buf, std::size_t n) const {
 }
 
 ReadResult GameProcess::readPlayerX(float& x) const {
+    float y = 0;
+    return readPlayerPos(x, y);
+}
+
+ReadResult GameProcess::readPlayerPos(float& x, float& y) const {
     if (!handle_) return ReadResult::NotAttached;
     if (!alive()) return ReadResult::ProcessGone;
     if (!offsets_.complete()) return ReadResult::OffsetsIncomplete;
@@ -132,9 +137,10 @@ ReadResult GameProcess::readPlayerX(float& x) const {
     }
     if (!plausiblePtr(cur)) return ReadResult::ImplausiblePointer;
 
-    float v = 0;
-    if (!readRaw(cur + chain.back(), &v, sizeof(v))) return ReadResult::ReadFailed;
-    if (!std::isfinite(v) || std::fabs(v) > 1.0e7f) return ReadResult::ImplausibleValue;
-    x = v;
+    float v[2] = {0.f, 0.f};  // X, then Y (the node position is stored as two consecutive floats)
+    if (!readRaw(cur + chain.back(), v, sizeof(v))) return ReadResult::ReadFailed;
+    if (!std::isfinite(v[0]) || std::fabs(v[0]) > 1.0e7f) return ReadResult::ImplausibleValue;
+    x = v[0];
+    y = (std::isfinite(v[1]) && std::fabs(v[1]) < 1.0e7f) ? v[1] : std::nanf("");
     return ReadResult::Ok;
 }

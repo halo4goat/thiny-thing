@@ -56,7 +56,7 @@ bool loadMacro(const std::filesystem::path& p, Macro& out, std::string& err) {
 bool saveMacro(const std::filesystem::path& p, const Macro& m, std::string& err) {
     std::ofstream f(p, std::ios::trunc);
     if (!f) { err = "cannot write " + p.string(); return false; }
-    f << kHeader << '\n' << std::fixed << std::setprecision(4);
+    f << kHeader << '\n' << std::setprecision(9);  // 9 significant digits round-trip a float exactly
     for (const auto& a : m.actions) f << a.x << ' ' << (a.down ? 1 : 0) << '\n';
     if (!f) { err = "write failed"; return false; }
     return true;
