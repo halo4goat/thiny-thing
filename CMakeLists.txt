@@ -33,4 +33,6 @@ add_custom_command(TARGET GdMacroMenu POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_SOURCE_DIR}/gd_offsets.cfg $<TARGET_FILE_DIR:GdMacroMenu>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_SOURCE_DIR}/thinkingspace2.gdm $<TARGET_FILE_DIR:GdMacroMenu>)
+            ${CMAKE_SOURCE_DIR}/thinkingspace2.gdm $<TARGET_FILE_DIR:GdMacroMenu>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/thinkingspace2.ref $<TARGET_FILE_DIR:GdMacroMenu>)
