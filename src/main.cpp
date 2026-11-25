@@ -95,6 +95,18 @@ struct App {
             bot.setMacro(std::move(m));
         } else {
             fileMsg = err;
+            return;
+        }
+        // The per-frame reference track sits next to the macro with the extension .ref
+        RefTrack r; std::string rerr;
+        std::filesystem::path rp = macroFile();
+        rp.replace_extension(".ref");
+        if (loadRef(rp, r, rerr)) {
+            fileMsg += "; reference track: " + std::to_string(r.x.size()) + " frames";
+            bot.setRef(std::move(r));
+        } else {
+            fileMsg += "; no reference track (" + rerr + ")";
+            bot.setRef(RefTrack{});
         }
     }
 
@@ -181,6 +193,13 @@ void drawUi(App& a) {
     if (ImGui::Button("Test sound")) a.bot.testClickSound();
     ImGui::TextDisabled("The sound is played by this menu. The game itself makes no sound when you jump.");
 
+    bool yfix = a.bot.yFix.load();
+    ImGui::BeginDisabled(running || !a.proc.attached() || !a.proc.canWrite() || a.bot.refSize() == 0);
+    if (ImGui::Checkbox("EXPERIMENTAL: correct Y to the replay every step (writes game memory)", &yfix)) a.bot.yFix = yfix;
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Needs the .ref file next to the macro and write access. Reference frames loaded: %zu. Write access: %s.",
+                        a.bot.refSize(), a.proc.attached() ? (a.proc.canWrite() ? "yes" : "no") : "attach first");
+
     ImGui::SeparatorText("Macro (relative paths are next to the exe)");
     ImGui::InputText("File", a.macroPath, sizeof(a.macroPath));
     ImGui::BeginDisabled(running);
@@ -203,6 +222,8 @@ void drawUi(App& a) {
                 (unsigned long long)a.bot.clicksSent.load(),
                 (unsigned long long)a.bot.clicksRecorded.load(),
                 (unsigned long long)a.bot.attempts.load());
+    ImGui::Text("Y corrections written: %llu   failed: %llu",
+                (unsigned long long)a.bot.yFixWritten.load(), (unsigned long long)a.bot.yFixFailed.load());
     ImGui::Text("Isolated mouse clicks: %llu sent, %llu skipped",
                 (unsigned long long)a.bot.isolatedSent.load(),
                 (unsigned long long)a.bot.isolatedSkipped.load());

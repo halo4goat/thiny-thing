@@ -32,6 +32,10 @@ public:
     std::atomic<bool> isolatedMouse{false};    // read once at start of playback
     std::atomic<float> isolatedHoldMs{5.f};
     std::atomic<bool> clickSound{false};       // read once at start of playback
+    std::atomic<bool> yFix{false};             // EXPERIMENTAL: rewrite the player's Y to the replay's every step; read once at start
+    std::atomic<std::uint64_t> yFixWritten{0}, yFixFailed{0};
+    void setRef(RefTrack r);
+    std::size_t refSize() const;
     void testClickSound() { sounder_.press(); }
 
     std::atomic<std::uint64_t> clicksSent{0}, clicksRecorded{0}, attempts{0};
@@ -56,12 +60,12 @@ public:
     std::vector<DeathRecord> deaths() const;
 
     // Playback trace for debugging (ring buffer, newest rows kept).
-    // event: 0 = X changed, 1 = press sent, 2 = release sent, 3 = restart detected
+    // event: 0 = X changed, 1 = press sent, 2 = release sent, 3 = restart detected, 4 = Y rewritten (y = value written)
     struct TraceRow { double tMs; float x; float y; int idx; int event; };
     std::vector<TraceRow> traceSnapshot() const;
 
 private:
-    void run(std::stop_token st, Mode m, InputKind kind, std::vector<MacroAction> actions);
+    void run(std::stop_token st, Mode m, InputKind kind, std::vector<MacroAction> actions, RefTrack ref, bool useYFix);
     void setStatus(std::string s);
 
     GameProcess& proc_;
@@ -71,6 +75,7 @@ private:
     mutable std::mutex mu_;
     std::string status_ = "idle";
     Macro macro_;
+    RefTrack ref_;
     std::vector<DeathRecord> deaths_;
 
     static constexpr std::size_t kTraceSize = 8192;

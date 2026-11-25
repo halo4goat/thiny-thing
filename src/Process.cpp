@@ -77,16 +77,22 @@ bool GameProcess::attach(const GameOffsets& o, std::string& err) {
               ", running game has " + std::to_string(size) + ". Offsets are for another build.";
         return false;
     }
-    HANDLE h = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
+    bool write = true;
+    HANDLE h = OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
+    if (!h) {
+        write = false;  // fall back to read-only
+        h = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
+    }
     if (!h) { err = "OpenProcess failed, error " + std::to_string(GetLastError()); return false; }
 
+    canWrite_ = write;
     handle_ = h; pid_ = pid; base_ = base; size_ = size; offsets_ = o;
     return true;
 }
 
 void GameProcess::detach() {
     if (handle_) CloseHandle(handle_);
-    handle_ = nullptr; pid_ = 0; base_ = size_ = 0;
+    handle_ = nullptr; pid_ = 0; base_ = size_ = 0; canWrite_ = false; posAddr_ = 0;
 }
 
 bool GameProcess::alive() const {
@@ -140,7 +146,19 @@ ReadResult GameProcess::readPlayerPos(float& x, float& y) const {
     float v[2] = {0.f, 0.f};  // X, then Y (the node position is stored as two consecutive floats)
     if (!readRaw(cur + chain.back(), v, sizeof(v))) return ReadResult::ReadFailed;
     if (!std::isfinite(v[0]) || std::fabs(v[0]) > 1.0e7f) return ReadResult::ImplausibleValue;
+    posAddr_ = cur + chain.back();
     x = v[0];
     y = (std::isfinite(v[1]) && std::fabs(v[1]) < 1.0e7f) ? v[1] : std::nanf("");
     return ReadResult::Ok;
+}
+
+bool GameProcess::writePlayerYIf(float expectedX, float newY) {
+    if (!canWrite_ || !std::isfinite(newY)) return false;
+    float x = 0, y = 0;
+    if (readPlayerPos(x, y) != ReadResult::Ok || x != expectedX) return false;  // also refreshes posAddr_
+    const std::uint64_t addr = posAddr_.load();
+    if (!plausiblePtr(addr)) return false;
+    SIZE_T written = 0;
+    return WriteProcessMemory(handle_, reinterpret_cast<LPVOID>(addr + sizeof(float)), &newY, sizeof(newY), &written) &&
+           written == sizeof(newY);
 }

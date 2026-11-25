@@ -61,3 +61,42 @@ bool saveMacro(const std::filesystem::path& p, const Macro& m, std::string& err)
     if (!f) { err = "write failed"; return false; }
     return true;
 }
+
+bool loadRef(const std::filesystem::path& p, RefTrack& out, std::string& err) {
+    std::ifstream f(p);
+    if (!f) { err = "cannot open " + p.string(); return false; }
+    std::string line;
+    if (!std::getline(f, line) || line.rfind("GDREF1", 0) != 0) { err = "not a GDREF1 file"; return false; }
+    RefTrack r;
+    int lineNo = 1;
+    while (std::getline(f, line)) {
+        ++lineNo;
+        if (line.empty()) continue;
+        std::istringstream ss(line);
+        float x = 0, y = 0;
+        if (!(ss >> x >> y) || !std::isfinite(x) || !std::isfinite(y)) {
+            err = "line " + std::to_string(lineNo) + ": expected '<x> <y>'";
+            return false;
+        }
+        if (!r.x.empty() && x < r.x.back()) { err = "line " + std::to_string(lineNo) + ": x goes backwards"; return false; }
+        if (r.x.size() >= 2'000'000) { err = "too many reference frames"; return false; }
+        r.x.push_back(x);
+        r.y.push_back(y);
+    }
+    if (r.empty()) { err = "reference file has no frames"; return false; }
+    out = std::move(r);
+    return true;
+}
+
+bool yFixTarget(const RefTrack& r, float x, float y, float minDiff, float maxDiff, float& target) {
+    constexpr float kTol = 0.01f;
+    if (r.empty() || !std::isfinite(x) || !std::isfinite(y)) return false;
+    auto it = std::lower_bound(r.x.begin(), r.x.end(), x - kTol);
+    if (it == r.x.end() || *it > x + kTol) return false;  // X is not on the reference grid
+    const std::size_t i = static_cast<std::size_t>(it - r.x.begin());
+    if (i + 1 < r.x.size() && r.x[i + 1] <= x + kTol) return false;  // two frames share this X: ambiguous
+    const float diff = std::fabs(y - r.y[i]);
+    if (diff < minDiff || diff > maxDiff) return false;
+    target = r.y[i];
+    return true;
+}

@@ -10,9 +10,18 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
     if (m == Mode::Idle) return true;
     if (!proc_.attached()) { err = "attach to the game first"; return false; }
     std::vector<MacroAction> actions;
+    RefTrack ref;
+    const bool useYFix = m == Mode::Playing && yFix.load();
     if (m == Mode::Playing) {
         actions = macro().actions;
         if (actions.empty()) { err = "no macro loaded"; return false; }
+        if (useYFix) {
+            { std::lock_guard lk(mu_); ref = ref_; }
+            if (ref.empty()) { err = "Y correction is on but no .ref file is loaded (it must sit next to the macro)"; return false; }
+            if (!proc_.canWrite()) { err = "no write access to the game process (run both at the same elevation)"; return false; }
+        }
+        yFixWritten = 0;
+        yFixFailed = 0;
         clicksSent = 0;
         attempts = 0;
         isolatedSent = 0;
@@ -32,8 +41,8 @@ bool Bot::start(Mode m, InputKind kind, std::string& err) {
         return false;
     }
     mode_ = m;
-    worker_ = std::jthread([this, m, kind, a = std::move(actions)](std::stop_token st) mutable {
-        run(st, m, kind, std::move(a));
+    worker_ = std::jthread([this, m, kind, a = std::move(actions), rf = std::move(ref), useYFix](std::stop_token st) mutable {
+        run(st, m, kind, std::move(a), std::move(rf), useYFix);
     });
     return true;
 }
@@ -48,6 +57,8 @@ void Bot::stop() {
 std::string Bot::status() const { std::lock_guard lk(mu_); return status_; }
 void Bot::setStatus(std::string s) { std::lock_guard lk(mu_); status_ = std::move(s); }
 Macro Bot::macro() const { std::lock_guard lk(mu_); return macro_; }
+void Bot::setRef(RefTrack r) { std::lock_guard lk(mu_); ref_ = std::move(r); }
+std::size_t Bot::refSize() const { std::lock_guard lk(mu_); return ref_.x.size(); }
 std::vector<Bot::DeathRecord> Bot::deaths() const { std::lock_guard lk(mu_); return deaths_; }
 
 void Bot::tracePush(double tMs, float x, float y, int idx, int event) {
@@ -66,7 +77,7 @@ std::vector<Bot::TraceRow> Bot::traceSnapshot() const {
 }
 void Bot::setMacro(Macro m) { std::lock_guard lk(mu_); macro_ = std::move(m); }
 
-void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAction> actions) {
+void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAction> actions, RefTrack ref, bool useYFix) {
     timeBeginPeriod(1);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     const int vk = virtualKeyFor(kind);
@@ -131,6 +142,7 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
     float traceX = -1.0e9f;
     bool lowPending = false;
     long long lowSince = 0;
+    float lastFixX = -1.0e9f;
 
     while (!st.stop_requested()) {
         float x = 0, y = 0;
@@ -235,6 +247,18 @@ void Bot::run(std::stop_token st, Mode mode, InputKind kind, std::vector<MacroAc
                     ++idx;
                 }
                 if (skipped) syncHold(holdBefore(actions, idx));
+                if (useYFix && x != lastFixX) {  // once per physics step, after the clicks have been handled
+                    lastFixX = x;
+                    float target = 0;
+                    if (yFixTarget(ref, x, y, 0.01f, 12.f, target)) {
+                        if (proc_.writePlayerYIf(x, target)) {
+                            ++yFixWritten;
+                            tracePush(msNow(), x, target, static_cast<int>(idx), 4);
+                        } else {
+                            ++yFixFailed;
+                        }
+                    }
+                }
                 setStatus("playing");
             }
         } else {  // Recording
